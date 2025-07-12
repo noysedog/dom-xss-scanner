@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DOM XSS Test Page</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .test-section {
+            background: white;
+            margin: 20px 0;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .vulnerable {
+            border-left: 4px solid #ff4444;
+        }
+        .safe {
+            border-left: 4px solid #44ff44;
+        }
+        h1 {
+            color: #333;
+            text-align: center;
+        }
+        h2 {
+            color: #555;
+            margin-top: 0;
+        }
+        .payload {
+            background: #fff3cd;
+            padding: 10px;
+            border-radius: 4px;
+            margin: 10px 0;
+        }
+        .result {
+            background: #f8f9fa;
+            padding: 10px;
+            border-radius: 4px;
+            margin: 10px 0;
+            border: 1px solid #dee2e6;
+        }
+        button {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        button:hover {
+            background: #0056b3;
+        }
+    </style>
+</head>
+<body>
+    <h1>🔍 DOM XSS Test Page</h1>
+    <p>Questa pagina contiene diverse vulnerabilità DOM-based XSS per testare il plugin.</p>
+
+    <!-- Test 1: innerHTML con location.search -->
+    <div class="test-section vulnerable">
+        <h2>Test 1: innerHTML + location.search (HIGH RISK)</h2>
+        <p>Parametro URL inserito direttamente in innerHTML</p>
+        <div class="payload">
+            <strong>Payload:</strong> <code>?name=&lt;script&gt;alert('XSS Test 1')&lt;/script&gt;</code>
+        </div>
+        <div class="result" id="test1-result">
+            <strong>Risultato:</strong> <span id="welcome-message">Caricamento...</span>
+        </div>
+    </div>
+
+    <!-- Test 2: eval con location.hash -->
+    <div class="test-section vulnerable">
+        <h2>Test 2: eval + location.hash (CRITICAL RISK)</h2>
+        <p>Hash URL passato direttamente a eval()</p>
+        <div class="payload">
+            <strong>Payload:</strong> <code>#alert('XSS Test 2')</code>
+        </div>
+        <div class="result" id="test2-result">
+            <strong>Risultato:</strong> <span id="eval-result">Caricamento...</span>
+        </div>
+    </div>
+
+    <!-- Test 3: document.write con referrer -->
+    <div class="test-section vulnerable">
+        <h2>Test 3: document.write + referrer (HIGH RISK)</h2>
+        <p>Referrer inserito con document.write</p>
+        <div class="payload">
+            <strong>Payload:</strong> Referrer con script tag
+        </div>
+        <div class="result" id="test3-result">
+            <strong>Risultato:</strong> <span id="referrer-result">Caricamento...</span>
+        </div>
+    </div>
+
+    <!-- Test 4: setTimeout con parametro -->
+    <div class="test-section vulnerable">
+        <h2>Test 4: setTimeout + URL parameter (CRITICAL RISK)</h2>
+        <p>Parametro URL passato a setTimeout come stringa</p>
+        <div class="payload">
+            <strong>Payload:</strong> <code>?code=alert('XSS Test 4')</code>
+        </div>
+        <div class="result" id="test4-result">
+            <strong>Risultato:</strong> <span id="timeout-result">Caricamento...</span>
+        </div>
+    </div>
+
+    <!-- Test 5: outerHTML con localStorage -->
+    <div class="test-section vulnerable">
+        <h2>Test 5: outerHTML + localStorage (HIGH RISK)</h2>
+        <p>Valore localStorage inserito in outerHTML</p>
+        <div class="payload">
+            <strong>Payload:</strong> <code>&lt;img src=x onerror=alert('XSS Test 5')&gt;</code>
+        </div>
+        <div class="result" id="test5-result">
+            <button onclick="setLocalStorage()">Imposta localStorage</button>
+            <button onclick="loadFromStorage()">Carica da localStorage</button>
+            <div id="storage-result"></div>
+        </div>
+    </div>
+
+    <!-- Test 6: insertAdjacentHTML con hash -->
+    <div class="test-section vulnerable">
+        <h2>Test 6: insertAdjacentHTML + hash (HIGH RISK)</h2>
+        <p>Hash URL inserito con insertAdjacentHTML</p>
+        <div class="payload">
+            <strong>Payload:</strong> <code>#&lt;img src=x onerror=alert('XSS Test 6')&gt;</code>
+        </div>
+        <div class="result" id="test6-result">
+            <div id="adjacent-container">Container per insertAdjacentHTML: </div>
+        </div>
+    </div>
+
+    <!-- Test 7: jQuery html() con parametro -->
+    <div class="test-section vulnerable">
+        <h2>Test 7: jQuery html() + parameter (HIGH RISK)</h2>
+        <p>Parametro URL inserito con jQuery .html()</p>
+        <div class="payload">
+            <strong>Payload:</strong> <code>?content=&lt;script&gt;alert('XSS Test 7')&lt;/script&gt;</code>
+        </div>
+        <div class="result" id="test7-result">
+            <div id="jquery-container">Container jQuery: Caricamento...</div>
+        </div>
+    </div>
+
+    <!-- Test 8: location.href assignment -->
+    <div class="test-section vulnerable">
+        <h2>Test 8: location.href assignment (MEDIUM RISK)</h2>
+        <p>Parametro URL usato per redirect</p>
+        <div class="payload">
+            <strong>Payload:</strong> <code>?redirect=javascript:alert('XSS Test 8')</code>
+        </div>
+        <div class="result" id="test8-result">
+            <button onclick="doRedirect()">Esegui Redirect</button>
+        </div>
+    </div>
+
+    <!-- Test sicuro per confronto -->
+    <div class="test-section safe">
+        <h2>Test Sicuro: textContent (NO RISK)</h2>
+        <p>Parametro URL inserito con textContent (sicuro)</p>
+        <div class="payload">
+            <strong>Payload:</strong> <code>?safe=&lt;script&gt;alert('Safe')&lt;/script&gt;</code>
+        </div>
+        <div class="result">
+            <strong>Risultato:</strong> <span id="safe-result">Caricamento...</span>
+        </div>
+    </div>
+
+    <!-- Include jQuery for Test 7 -->
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+
+    <script>
+        // Test 1: innerHTML con location.search
+        function test1() {
+            const params = new URLSearchParams(location.search);
+            const name = params.get('name') || 'Utente';
+            document.getElementById('welcome-message').innerHTML = 'Benvenuto ' + name + '!';
+        }
+
+        // Test 2: eval con location.hash
+        function test2() {
+            const hash = location.hash.substring(1);
+            if (hash) {
+                try {
+                    eval(hash);
+                    document.getElementById('eval-result').innerHTML = 'Eseguito: ' + hash;
+                } catch (e) {
+                    document.getElementById('eval-result').innerHTML = 'Errore: ' + e.message;
+                }
+            } else {
+                document.getElementById('eval-result').innerHTML = 'Nessun hash presente';
+            }
+        }
+
+        // Test 3: document.write con referrer
+        function test3() {
+            const referrer = document.referrer || 'Accesso diretto';
+            document.write('<script>document.getElementById("referrer-result").innerHTML = "Referrer: ' + referrer + '";</script>');
+        }
+
+        // Test 4: setTimeout con parametro
+        function test4() {
+            const params = new URLSearchParams(location.search);
+            const code = params.get('code');
+            if (code) {
+                setTimeout(code, 100);
+                document.getElementById('timeout-result').innerHTML = 'Codice programmato: ' + code;
+            } else {
+                document.getElementById('timeout-result').innerHTML = 'Nessun codice specificato';
+            }
+        }
+
+        // Test 5: outerHTML con localStorage
+        function setLocalStorage() {
+            const maliciousData = '<img src=x onerror=alert("XSS Test 5")>';
+            localStorage.setItem('userdata', maliciousData);
+            document.getElementById('storage-result').innerHTML = 'Dati salvati in localStorage';
+        }
+
+        function loadFromStorage() {
+            const data = localStorage.getItem('userdata') || 'Nessun dato';
+            document.getElementById('storage-result').outerHTML = '<div id="storage-result">Dati caricati: ' + data + '</div>';
+        }
+
+        // Test 6: insertAdjacentHTML con hash
+        function test6() {
+            const hash = location.hash.substring(1);
+            if (hash) {
+                document.getElementById('adjacent-container').insertAdjacentHTML('beforeend', hash);
+            }
+        }
+
+        // Test 7: jQuery html() con parametro
+        function test7() {
+            const params = new URLSearchParams(location.search);
+            const content = params.get('content') || 'Contenuto predefinito';
+            $('#jquery-container').html('Contenuto jQuery: ' + content);
+        }
+
+        // Test 8: location.href assignment
+        function doRedirect() {
+            const params = new URLSearchParams(location.search);
+            const redirectUrl = params.get('redirect');
+            if (redirectUrl) {
+                location.href = redirectUrl;
+            } else {
+                alert('Nessun URL di redirect specificato');
+            }
+        }
+
+        // Test sicuro
+        function testSafe() {
+            const params = new URLSearchParams(location.search);
+            const safe = params.get('safe') || 'Testo sicuro';
+            document.getElementById('safe-result').textContent = safe;
+        }
+
+        // Esegui tutti i test all'avvio
+        window.onload = function() {
+            test1();
+            test2();
+            test3();
+            test4();
+            test6();
+            test7();
+            testSafe();
+        };
+    </script>
+</body>
+</html>

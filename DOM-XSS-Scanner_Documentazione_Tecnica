@@ -1,0 +1,299 @@
+# DOM XSS Scanner - Documentazione Tecnica
+
+## Overview del Plugin
+
+Plugin Firefox per analizzare e tracciare vulnerabilità DOM-based XSS attraverso il monitoraggio real-time del flusso parametri URL → sink JavaScript → modifiche DOM.
+
+## Architettura Generale
+
+```
+┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
+│   DevTools UI   │    │  Content Script │    │  Background     │
+│   (panel.js)    │◄──►│ (coordinator)   │◄──►│ (background.js) │
+└─────────────────┘    └─────────────────┘    └─────────────────┘
+                                │
+                                ▼
+                    ┌─────────────────────────────────┐
+                    │        Core Engine              │
+                    │  ┌─────────────────────────────┐│
+                    │  │     url-analyzer.js         ││
+                    │  │  - Estrae parametri URL     ││
+                    │  │  - Monitora sources         ││
+                    │  │  - Filtra noise params      ││
+                    │  └─────────────────────────────┘│
+                    │  ┌─────────────────────────────┐│
+                    │  │     sink-detector.js        ││
+                    │  │  - Trova sink nel JS        ││
+                    │  │  - Intercetta uso sink      ││
+                    │  │  - Categorizza per rischio  ││
+                    │  └─────────────────────────────┘│
+                    │  ┌─────────────────────────────┐│
+                    │  │     dom-tracker.js          ││
+                    │  │  - Correla parametri→sink   ││
+                    │  │  - Evidenzia elementi DOM   ││
+                    │  │  - Sistema breakpoint       ││
+                    │  └─────────────────────────────┘│
+                    └─────────────────────────────────┘
+```
+
+## File Structure
+
+```
+dom-xss-scanner/
+├── manifest.json                   # Configurazione extension
+├── devtools/
+│   ├── devtools.html              # Entry point DevTools
+│   ├── devtools.js                # Crea panel DevTools
+│   ├── panel.html                 # UI principale
+│   └── panel.js                   # Logic UI (DA IMPLEMENTARE)
+├── content/
+│   ├── url-analyzer.js            # ✅ COMPLETATO
+│   ├── sink-detector.js           # ✅ COMPLETATO  
+│   ├── dom-tracker.js             # ✅ COMPLETATO
+│   └── content-script.js          # Coordinatore (DA IMPLEMENTARE)
+├── background/
+│   └── background.js              # Comunicazione (DA IMPLEMENTARE)
+└── injected/
+    └── page-script.js             # Script pagina (DA IMPLEMENTARE)
+```
+
+## Decisioni Architetturali
+
+### 1. Sources Analizzate (url-analyzer.js)
+**Principali:**
+- `location.search` (?param=value)
+- `location.hash` (#value)
+- `location.pathname` (routing SPA)
+- `document.referrer` (provenienza)
+
+**Avanzate:**
+- `document.cookie` (se letti da JS)
+- `localStorage/sessionStorage` (storage browser)
+- `window.name` (raramente usato)
+- `postMessage` events (comunicazione iframe)
+
+**Filtri noise:**
+- utm_*, fbclid, gclid (tracking)
+- _ga, _gid (analytics)
+- ref, source, medium (marketing)
+
+### 2. Sink Patterns (sink-detector.js)
+
+**CRITICAL (Rosso):**
+```javascript
+eval(), Function(), setTimeout(string), setInterval(string)
+```
+
+**HIGH (Arancione):**
+```javascript
+innerHTML, outerHTML, document.write, insertAdjacentHTML
+jQuery: .html(), .append(), .prepend()
+Event handlers: onclick, addEventListener
+```
+
+**MEDIUM (Giallo):**
+```javascript
+location.href, location.assign, window.open
+setAttribute('on*'), .src, .href, .action
+```
+
+**LOW (Verde):**
+```javascript
+localStorage.setItem, sessionStorage.setItem, document.cookie
+```
+
+### 3. Tracking System (dom-tracker.js)
+
+**Flusso principale:**
+```
+Parameter Access → Stack Trace Analysis → Sink Usage → DOM Change → Visual Highlight
+```
+
+**Correlazione algoritmo:**
+- Finestra temporale: 1 secondo
+- Analisi stack trace: funzioni comuni
+- Mapping bidirezionale: parametri ↔ sink
+
+**Breakpoint system:**
+- Automatici su parametri specifici
+- Debug info completo
+- Integrazione con DevTools
+
+## API Events Sistema
+
+### Custom Events Interni
+
+```javascript
+// Parametri trovati
+'domxss-parameters-found'
+detail: { timestamp, url, parameters }
+
+// Sink trovati
+'domxss-sinks-found'  
+detail: { scriptId, sinks, timestamp }
+
+// Parametro acceduto
+'domxss-parameter-accessed'
+detail: { source, parameter, value, stackTrace }
+
+// Sink utilizzato
+'domxss-sink-used'
+detail: { type, element, value, stackTrace }
+
+// Connessione trovata
+'domxss-connection-found'
+detail: { parameterId, sinkId, timestamp }
+
+// Breakpoint hit
+'domxss-breakpoint-hit'
+detail: { parameter, value, source, stackTrace }
+```
+
+## Intercettazioni Real-time
+
+### URL Analyzer
+```javascript
+// Intercetta accessi parametri
+location.search (getter)
+location.hash (getter) 
+URLSearchParams.get()
+localStorage.getItem()
+```
+
+### Sink Detector  
+```javascript
+// Intercetta uso sink
+Element.prototype.innerHTML (setter)
+Element.prototype.outerHTML (setter)
+document.write()
+window.eval()
+window.setTimeout() // solo string
+location.href (setter)
+```
+
+### DOM Tracker
+```javascript
+// Mutation Observer
+childList: true     // Elementi aggiunti/rimossi
+attributes: true    // Attributi modificati
+characterData: true // Testo modificato
+subtree: true       // Cambi nested
+```
+
+## Highlighting System
+
+### Visual Feedback
+```css
+.domxss-highlight {
+    border: 2px solid #ff0000;
+    background: rgba(255, 0, 0, 0.1);
+    box-shadow: 0 0 10px rgba(255, 0, 0, 0.5);
+    position: absolute;
+    z-index: 999999;
+}
+```
+
+### Auto-cleanup
+- Rimozione automatica dopo 5 secondi
+- Cleanup su page unload
+- Re-highlighting su DOM changes
+
+## Workflow Completo
+
+### 1. Inizializzazione
+```javascript
+URLAnalyzer.init()     // Scansiona URL corrente
+SinkDetector.init()    // Analizza script esistenti  
+DOMTracker.init()      // Imposta intercettazioni
+```
+
+### 2. Monitoraggio Real-time
+```javascript
+// User naviga → URL cambia
+URLAnalyzer.analyzeCurrentURL()
+
+// Script usa parametro
+→ domxss-parameter-accessed event
+
+// Script usa sink  
+→ domxss-sink-used event
+
+// Tracker correla
+→ domxss-connection-found event
+
+// DOM cambia
+→ MutationObserver → Visual highlight
+```
+
+### 3. Output UI
+```
+┌─ Parametri URL Rilevati ─┐
+│ ?name=test (location.search) │
+│ #section1 (location.hash)    │
+└─────────────────────────────┘
+
+┌─ Sources & Sinks Trovati ─┐
+│ innerHTML (HIGH) - line 45   │
+│ eval() (CRITICAL) - line 67  │
+└─────────────────────────────┘
+
+┌─ Collegamenti Trovati ─┐
+│ name → innerHTML → div#welcome │
+└─────────────────────────────┘
+
+┌─ DOM Elementi Evidenziati ─┐
+│ div#welcome (highlighted)     │
+└─────────────────────────────┘
+```
+
+## File Rimanenti da Implementare
+
+### content-script.js (Coordinatore)
+- Inizializza i 3 core engine
+- Gestisce comunicazione con DevTools
+- Aggrega dati per UI
+
+### panel.js (DevTools UI)
+- Riceve dati dai content script
+- Aggiorna interfaccia real-time
+- Gestisce breakpoint UI
+
+### background.js (Comunicazione)
+- Messaggio passing tra content/devtools
+- Gestione persistence dati
+- Coordinamento multi-tab
+
+### page-script.js (Injected)
+- Accesso completo a window context
+- Intercettazioni profonde
+- Comunicazione con content script
+
+## Performance Considerations
+
+### Ottimizzazioni implementate:
+- Throttling eventi ad alta frequenza
+- Cleanup automatico highlight
+- Filtri noise parameters
+- Finestra temporale correlazioni (1s)
+
+### Memory management:
+- Maps per fast lookup
+- Auto-cleanup su page unload
+- Limit su stored connections
+- Garbage collection old data
+
+## Security Considerations
+
+### Intercettazioni safe:
+- Backup originali funzioni
+- Proper error handling
+- No blocking normal execution
+- Restore su unload
+
+### Data sanitization:
+- Escape HTML in tooltip
+- Validate DOM paths
+- Safe JSON parsing
+- XSS prevention in UI
+
+Prossimi file da implementare: content-script.js, panel.js, background.js, page-script.js

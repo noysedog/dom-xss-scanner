@@ -1,0 +1,16 @@
+dom-xss-scanner/
+├── manifest.json
+├── devtools/
+│   ├── devtools.html
+│   ├── devtools.js
+│   ├── panel.html
+│   └── panel.js (ancora da creare)
+├── content/
+│   ├── url-analyzer.js (ancora da creare)
+│   ├── sink-detector.js (ancora da creare)
+│   ├── dom-tracker.js (ancora da creare)
+│   └── content-script.js (ancora da creare)
+├── background/
+│   └── background.js (ancora da creare)
+└── injected/
+    └── page-script.js (ancora da creare)

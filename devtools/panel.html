@@ -1,0 +1,289 @@
+// ===============================
+// DEVTOOLS/PANEL.HTML
+// ===============================
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <style>
+        body { font-family: Arial, sans-serif; padding: 10px; background: #f8f9fa; }
+        
+        .header { 
+            background: white; 
+            padding: 15px; 
+            border-radius: 8px; 
+            margin-bottom: 20px; 
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1); 
+        }
+        
+        .summary { 
+            display: flex; 
+            gap: 20px; 
+            align-items: center; 
+        }
+        
+        .counter { 
+            display: flex; 
+            flex-direction: column; 
+            align-items: center; 
+        }
+        
+        .counter-value { 
+            font-size: 24px; 
+            font-weight: bold; 
+            color: #007bff; 
+        }
+        
+        .counter-label { 
+            font-size: 12px; 
+            color: #666; 
+        }
+        
+        .risk-indicator { 
+            padding: 8px 16px; 
+            border-radius: 20px; 
+            font-weight: bold; 
+            cursor: pointer; 
+        }
+        
+        .risk-none { background: #d4edda; color: #155724; }
+        .risk-low { background: #fff3cd; color: #856404; }
+        .risk-medium { background: #ffeaa7; color: #856404; }
+        .risk-high { background: #f8d7da; color: #721c24; }
+        .risk-critical { background: #f5c6cb; color: #721c24; animation: pulse 2s infinite; }
+        
+        @keyframes pulse {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.05); }
+            100% { transform: scale(1); }
+        }
+        
+        .vulnerability-card {
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 15px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            border-left: 4px solid;
+        }
+        
+        .vulnerability-card.critical { border-left-color: #dc3545; }
+        .vulnerability-card.high { border-left-color: #fd7e14; }
+        .vulnerability-card.medium { border-left-color: #ffc107; }
+        .vulnerability-card.low { border-left-color: #28a745; }
+        
+        .vulnerability-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+        
+        .vulnerability-title {
+            font-size: 16px;
+            font-weight: bold;
+            color: #333;
+        }
+        
+        .severity-badge {
+            padding: 4px 8px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: bold;
+            text-transform: uppercase;
+        }
+        
+        .severity-critical { background: #dc3545; color: white; }
+        .severity-high { background: #fd7e14; color: white; }
+        .severity-medium { background: #ffc107; color: #333; }
+        .severity-low { background: #28a745; color: white; }
+        
+        .flow-container {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            margin: 15px 0;
+        }
+        
+        .flow-item {
+            background: #f8f9fa;
+            padding: 10px;
+            border-radius: 6px;
+            border: 1px solid #e9ecef;
+            flex: 1;
+        }
+        
+        .flow-arrow {
+            font-size: 18px;
+            color: #666;
+            font-weight: bold;
+        }
+        
+        .flow-source {
+            background: #e3f2fd;
+            border-color: #2196f3;
+        }
+        
+        .flow-sink {
+            background: #ffeaa7;
+            border-color: #f39c12;
+        }
+        
+        .flow-dom {
+            background: #f3e5f5;
+            border-color: #9c27b0;
+        }
+        
+        .flow-label {
+            font-size: 10px;
+            color: #666;
+            text-transform: uppercase;
+            margin-bottom: 5px;
+        }
+        
+        .flow-content {
+            font-family: monospace;
+            font-size: 12px;
+            color: #333;
+            word-break: break-all;
+        }
+        
+        .vulnerability-details {
+            margin-top: 15px;
+            padding-top: 15px;
+            border-top: 1px solid #e9ecef;
+        }
+        
+        .vulnerability-risk {
+            background: #fff3cd;
+            padding: 10px;
+            border-radius: 4px;
+            margin-bottom: 10px;
+            font-size: 14px;
+        }
+        
+        .vulnerability-test {
+            background: #d1ecf1;
+            padding: 10px;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        
+        .action-buttons {
+            display: flex;
+            gap: 10px;
+            margin-top: 15px;
+        }
+        
+        .action-btn {
+            padding: 6px 12px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            background: white;
+            cursor: pointer;
+            font-size: 12px;
+        }
+        
+        .action-btn:hover {
+            background: #f8f9fa;
+        }
+        
+        .action-btn.highlight {
+            background: #ffc107;
+            border-color: #ffc107;
+            color: #333;
+        }
+        
+        .no-vulnerabilities {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+        }
+        
+        .no-vulnerabilities .icon {
+            font-size: 48px;
+            margin-bottom: 10px;
+        }
+        
+        .controls {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+        
+        .control-btn {
+            padding: 8px 16px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            background: white;
+            cursor: pointer;
+        }
+        
+        .control-btn:hover {
+            background: #f8f9fa;
+        }
+        
+        .loading {
+            text-align: center;
+            padding: 20px;
+            color: #666;
+        }
+        
+        .last-update {
+            font-size: 11px;
+            color: #666;
+            text-align: right;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="summary">
+            <div class="counter">
+                <div class="counter-value" id="vuln-count">0</div>
+                <div class="counter-label">Vulnerabilities</div>
+            </div>
+            <div class="counter">
+                <div class="counter-value" id="param-count">0</div>
+                <div class="counter-label">Parameters</div>
+            </div>
+            <div class="counter">
+                <div class="counter-value" id="sink-count">0</div>
+                <div class="counter-label">Sinks</div>
+            </div>
+            <div class="risk-indicator" id="risk-indicator">NONE</div>
+        </div>
+        <div class="last-update" id="last-update">Last update: Never</div>
+    </div>
+    
+    <div class="controls">
+        <button class="control-btn" id="refresh-btn">🔄 Refresh</button>
+        <button class="control-btn" id="clear-highlights-btn">🧹 Clear Highlights</button>
+        <button class="control-btn" id="export-btn">📥 Export</button>
+    </div>
+    
+    <div id="loading-indicator" class="loading" style="display: none;">
+        🔍 Scanning for vulnerabilities...
+    </div>
+    
+    <div id="disconnected-warning" class="loading" style="display: none;">
+        ⚠️ Extension disconnected. Please reload the page.
+    </div>
+    
+    <div id="vulnerabilities-container">
+        <div class="no-vulnerabilities" id="no-vulnerabilities">
+            <div class="icon">✅</div>
+            <div>No vulnerabilities detected</div>
+            <div style="font-size: 12px; margin-top: 5px;">
+                All parameters are safely handled or no parameters found
+            </div>
+        </div>
+    </div>
+    
+    <div id="realtime-activity" style="display: none;">
+        <!-- Real-time activity feed -->
+    </div>
+    
+    <script src="panel.js"></script>
+</body>
+</html>
