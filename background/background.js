@@ -1,636 +1,207 @@
 // ===============================
-// BACKGROUND.JS
-// Background script per DOM XSS Scanner
+// background/background.js  (v2.0)
+// Tiene lo stato per tab (persistente), aggiorna il badge e fa da hub
+// tra relay (content script) e pannello DevTools.
 // ===============================
+'use strict';
 
-class DOMXSSBackground {
-    constructor() {
-        this.connections = new Map();
-        this.tabData = new Map();
-        this.activeScans = new Set();
-        this.init();
-    }
+const api = typeof browser !== 'undefined' ? browser : chrome;
 
-    init() {
-        this.setupConnectionHandlers();
-        this.setupTabHandlers();
-        this.setupContextMenu();
-        this.setupNotifications();
-        console.log('DOM XSS Scanner background initialized');
-    }
+// Marcatore innocuo per il pulsante "Prova marcatore": contiene metacaratteri
+// HTML e un <i>, nessuno script.
+const MARKER = 'dxs9q"\'<i>x</i>';
+const SEV = { low: 0, medium: 1, high: 2, critical: 3 };
+const COLORS = ['#2da44e', '#d29922', '#e8590c', '#d1242f'];
+const MAX_FINDINGS = 500;
 
-    // ===============================
-    // CONNECTION HANDLERS
-    // ===============================
-    setupConnectionHandlers() {
-        // Gestisce connessioni dai content script e DevTools
-        chrome.runtime.onConnect.addListener((port) => {
-            console.log('New connection:', port.name);
-            
-            if (port.name === 'dom-xss-scanner') {
-                this.handleScannerConnection(port);
-            }
-        });
+const tabs = new Map();   // tabId -> stato
+const ports = new Map();  // tabId -> Set<Port>
+const pending = new Set();
 
-        // Gestisce messaggi one-time
-        chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-            return this.handleMessage(message, sender, sendResponse);
-        });
-    }
-
-    handleScannerConnection(port) {
-        const tabId = port.sender?.tab?.id;
-        
-        if (!tabId) {
-            console.warn('Connection without tab ID');
-            return;
-        }
-
-        // Salva connessione
-        this.connections.set(tabId, port);
-        
-        // Setup message handler
-        port.onMessage.addListener((message) => {
-            this.handlePortMessage(message, tabId);
-        });
-
-        // Cleanup on disconnect
-        port.onDisconnect.addListener(() => {
-            this.handleDisconnect(tabId);
-        });
-
-        console.log(`Scanner connected for tab ${tabId}`);
-    }
-
-    handlePortMessage(message, tabId) {
-        const { type, data } = message;
-        
-        switch (type) {
-            case 'scan-update':
-                this.handleScanUpdate(data, tabId);
-                break;
-            case 'vulnerability-found':
-                this.handleVulnerabilityFound(data, tabId);
-                break;
-            case 'scan-complete':
-                this.handleScanComplete(data, tabId);
-                break;
-            case 'request-tab-info':
-                this.sendTabInfo(tabId);
-                break;
-            default:
-                console.log('Unknown port message:', type);
-        }
-    }
-
-    handleMessage(message, sender, sendResponse) {
-        const { type, data } = message;
-        
-        switch (type) {
-            case 'vulnerability-found':
-                this.handleVulnerabilityAlert(data, sender.tab?.id);
-                sendResponse({ success: true });
-                break;
-                
-            case 'get-scan-status':
-                this.getScanStatus(sender.tab?.id, sendResponse);
-                return true; // Async response
-                
-            case 'start-scan':
-                this.startScan(sender.tab?.id, data);
-                sendResponse({ success: true });
-                break;
-                
-            case 'stop-scan':
-                this.stopScan(sender.tab?.id);
-                sendResponse({ success: true });
-                break;
-                
-            case 'get-tab-data':
-                this.getTabData(sender.tab?.id, sendResponse);
-                return true; // Async response
-                
-            case 'export-scan-data':
-                this.exportScanData(sender.tab?.id, sendResponse);
-                return true; // Async response
-                
-            default:
-                console.log('Unknown message:', type);
-        }
-        
-        return false;
-    }
-
-    handleVulnerabilityAlert(vulnerabilityData, tabId) {
-        if (!tabId) return;
-
-        // Aggiorna badge con icona di allerta
-        this.updateVulnerabilityBadge(tabId, vulnerabilityData.severity);
-
-        // Mostra notification per vulnerabilità critiche
-        if (vulnerabilityData.severity === 'CRITICAL') {
-            this.showCriticalVulnerabilityNotification(vulnerabilityData, tabId);
-        }
-
-        // Aggiorna dati tab
-        const tabData = this.tabData.get(tabId) || {};
-        tabData.vulnerabilities = tabData.vulnerabilities || [];
-        tabData.vulnerabilities.push({
-            ...vulnerabilityData,
-            timestamp: Date.now()
-        });
-        
-        tabData.hasVulnerabilities = true;
-        tabData.vulnerabilityCount = tabData.vulnerabilities.length;
-        
-        this.tabData.set(tabId, tabData);
-
-        console.warn('🚨 VULNERABILITY LOGGED:', vulnerabilityData);
-    }
-
-    updateVulnerabilityBadge(tabId, severity) {
-        const badgeConfig = this.getBadgeConfigBySeverity(severity);
-        
-        // Badge con icona di allerta
-        if (typeof chrome !== 'undefined' && chrome.action) {
-            chrome.action.setBadgeText({
-                text: '!',
-                tabId: tabId
-            });
-            
-            chrome.action.setBadgeBackgroundColor({
-                color: badgeConfig.color,
-                tabId: tabId
-            });
-
-            // Aggiorna title per tooltip
-            chrome.action.setTitle({
-                title: `DOM XSS Scanner - ${badgeConfig.text} vulnerability found!`,
-                tabId: tabId
-            });
-        } else if (typeof chrome !== 'undefined' && chrome.browserAction) {
-            // Fallback per versioni precedenti
-            chrome.browserAction.setBadgeText({
-                text: '!',
-                tabId: tabId
-            });
-            
-            chrome.browserAction.setBadgeBackgroundColor({
-                color: badgeConfig.color,
-                tabId: tabId
-            });
-
-            chrome.browserAction.setTitle({
-                title: `DOM XSS Scanner - ${badgeConfig.text} vulnerability found!`,
-                tabId: tabId
-            });
-        }
-    }
-
-    getBadgeConfigBySeverity(severity) {
-        const configs = {
-            'CRITICAL': { color: '#ff0000', text: 'Critical' },
-            'HIGH': { color: '#ff6600', text: 'High' },
-            'MEDIUM': { color: '#ffcc00', text: 'Medium' },
-            'LOW': { color: '#33cc33', text: 'Low' }
-        };
-        
-        return configs[severity] || configs['MEDIUM'];
-    }
-
-    handleDisconnect(tabId) {
-        this.connections.delete(tabId);
-        this.activeScans.delete(tabId);
-        console.log(`Scanner disconnected for tab ${tabId}`);
-    }
-
-    // ===============================
-    // TAB MANAGEMENT
-    // ===============================
-    setupTabHandlers() {
-        // Cleanup quando tab viene chiuso
-        chrome.tabs.onRemoved.addListener((tabId) => {
-            this.cleanupTab(tabId);
-        });
-
-        // Reset quando tab naviga
-        chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
-            if (changeInfo.status === 'loading' && changeInfo.url) {
-                this.resetTabData(tabId);
-            }
-        });
-
-        // Gestisce tab activation per notifications
-        chrome.tabs.onActivated.addListener((activeInfo) => {
-            this.handleTabActivated(activeInfo.tabId);
-        });
-    }
-
-    cleanupTab(tabId) {
-        this.connections.delete(tabId);
-        this.tabData.delete(tabId);
-        this.activeScans.delete(tabId);
-        console.log(`Cleaned up tab ${tabId}`);
-    }
-
-    resetTabData(tabId) {
-        const existingData = this.tabData.get(tabId);
-        if (existingData) {
-            this.tabData.set(tabId, {
-                ...existingData,
-                parameters: [],
-                sinks: [],
-                connections: [],
-                lastScan: null,
-                scanInProgress: false
-            });
-        }
-    }
-
-    handleTabActivated(tabId) {
-        const tabData = this.tabData.get(tabId);
-        if (tabData && tabData.hasVulnerabilities) {
-            // Mostra badge se ci sono vulnerabilità
-            this.updateBadge(tabId, tabData.vulnerabilityCount);
-        }
-    }
-
-    // ===============================
-    // SCAN MANAGEMENT
-    // ===============================
-    handleScanUpdate(data, tabId) {
-        const tabData = this.tabData.get(tabId) || {};
-        
-        // Aggiorna dati tab
-        this.tabData.set(tabId, {
-            ...tabData,
-            ...data,
-            lastUpdate: Date.now(),
-            scanInProgress: true
-        });
-
-        // Invia aggiornamento ai DevTools se connessi
-        this.notifyDevTools(tabId, 'scan-update', data);
-    }
-
-    handleVulnerabilityFound(data, tabId) {
-        const tabData = this.tabData.get(tabId) || {};
-        
-        // Aggiorna contatore vulnerabilità
-        const vulnCount = (tabData.vulnerabilityCount || 0) + 1;
-        
-        this.tabData.set(tabId, {
-            ...tabData,
-            hasVulnerabilities: true,
-            vulnerabilityCount: vulnCount,
-            lastVulnerability: data,
-            lastVulnerabilityTime: Date.now()
-        });
-
-        // Aggiorna badge
-        this.updateBadge(tabId, vulnCount);
-        
-        // Mostra notifica se critica
-        if (data.severity === 'critical') {
-            this.showCriticalVulnerabilityNotification(data, tabId);
-        }
-
-        // Invia ai DevTools
-        this.notifyDevTools(tabId, 'vulnerability-found', data);
-    }
-
-    handleScanComplete(data, tabId) {
-        const tabData = this.tabData.get(tabId) || {};
-        
-        this.tabData.set(tabId, {
-            ...tabData,
-            scanInProgress: false,
-            lastScan: Date.now(),
-            scanResults: data
-        });
-
-        this.activeScans.delete(tabId);
-        
-        // Invia completion ai DevTools
-        this.notifyDevTools(tabId, 'scan-complete', data);
-        
-        console.log(`Scan complete for tab ${tabId}:`, data);
-    }
-
-    startScan(tabId, options = {}) {
-        if (this.activeScans.has(tabId)) {
-            console.log(`Scan already active for tab ${tabId}`);
-            return;
-        }
-
-        this.activeScans.add(tabId);
-        
-        // Invia comando di avvio al content script
-        this.sendToContentScript(tabId, {
-            type: 'start-scan',
-            options: options
-        });
-    }
-
-    stopScan(tabId) {
-        this.activeScans.delete(tabId);
-        
-        // Invia comando di stop al content script
-        this.sendToContentScript(tabId, {
-            type: 'stop-scan'
-        });
-    }
-
-    getScanStatus(tabId, sendResponse) {
-        const tabData = this.tabData.get(tabId);
-        const isActive = this.activeScans.has(tabId);
-        
-        sendResponse({
-            isActive: isActive,
-            data: tabData,
-            hasConnection: this.connections.has(tabId)
-        });
-    }
-
-    // ===============================
-    // COMMUNICATION HELPERS
-    // ===============================
-    sendToContentScript(tabId, message) {
-        chrome.tabs.sendMessage(tabId, message, (response) => {
-            if (chrome.runtime.lastError) {
-                console.warn(`Error sending to content script:`, chrome.runtime.lastError);
-            }
-        });
-    }
-
-    notifyDevTools(tabId, type, data) {
-        const port = this.connections.get(tabId);
-        if (port) {
-            try {
-                port.postMessage({
-                    type: type,
-                    data: data,
-                    timestamp: Date.now()
-                });
-            } catch (error) {
-                console.warn('Error notifying DevTools:', error);
-            }
-        }
-    }
-
-    sendTabInfo(tabId) {
-        chrome.tabs.get(tabId, (tab) => {
-            if (chrome.runtime.lastError) {
-                console.warn('Error getting tab info:', chrome.runtime.lastError);
-                return;
-            }
-            
-            this.notifyDevTools(tabId, 'tab-info', {
-                url: tab.url,
-                title: tab.title,
-                favIconUrl: tab.favIconUrl
-            });
-        });
-    }
-
-    // ===============================
-    // CONTEXT MENU
-    // ===============================
-    setupContextMenu() {
-        // Context menu solo se supportato (Chrome)
-        if (typeof chrome !== 'undefined' && chrome.contextMenus) {
-            chrome.contextMenus.create({
-                id: 'dom-xss-scan',
-                title: 'Scan for DOM XSS',
-                contexts: ['page']
-            });
-
-            chrome.contextMenus.create({
-                id: 'dom-xss-scan-element',
-                title: 'Check element for XSS',
-                contexts: ['all']
-            });
-
-            chrome.contextMenus.onClicked.addListener((info, tab) => {
-                this.handleContextMenuClick(info, tab);
-            });
-        } else {
-            console.log('Context menus not supported in this browser');
-        }
-    }
-
-    handleContextMenuClick(info, tab) {
-        switch (info.menuItemId) {
-            case 'dom-xss-scan':
-                this.startScan(tab.id);
-                break;
-                
-            case 'dom-xss-scan-element':
-                this.sendToContentScript(tab.id, {
-                    type: 'scan-element',
-                    elementInfo: {
-                        tagName: info.tagName,
-                        selectionText: info.selectionText
-                    }
-                });
-                break;
-        }
-    }
-
-    // ===============================
-    // NOTIFICATIONS & BADGE
-    // ===============================
-    setupNotifications() {
-        // Request permission se necessario e supportato
-        if (typeof chrome !== 'undefined' && chrome.notifications) {
-            chrome.notifications.onClicked.addListener((notificationId) => {
-                this.handleNotificationClick(notificationId);
-            });
-        }
-    }
-
-    updateBadge(tabId, count) {
-        const text = count > 0 ? count.toString() : '';
-        const color = this.getBadgeColor(count);
-        
-        // Badge API - verifica supporto
-        if (typeof chrome !== 'undefined' && chrome.action) {
-            chrome.action.setBadgeText({
-                text: text,
-                tabId: tabId
-            });
-            
-            chrome.action.setBadgeBackgroundColor({
-                color: color,
-                tabId: tabId
-            });
-        } else if (typeof chrome !== 'undefined' && chrome.browserAction) {
-            // Fallback per versioni precedenti
-            chrome.browserAction.setBadgeText({
-                text: text,
-                tabId: tabId
-            });
-            
-            chrome.browserAction.setBadgeBackgroundColor({
-                color: color,
-                tabId: tabId
-            });
-        }
-    }
-
-    getBadgeColor(count) {
-        if (count === 0) return '#00FF00';  // Verde
-        if (count <= 2) return '#FFA500';  // Arancione
-        return '#FF0000';  // Rosso
-    }
-
-    showCriticalVulnerabilityNotification(vulnerability, tabId) {
-        // Notifiche solo se supportate
-        if (typeof chrome === 'undefined' || !chrome.notifications) {
-            console.log('Notifications not supported');
-            return;
-        }
-        
-        const notificationId = `critical-${tabId}-${Date.now()}`;
-        
-        chrome.notifications.create(notificationId, {
-            type: 'basic',
-            iconUrl: 'icon.png',
-            title: 'Critical DOM XSS Vulnerability Found!',
-            message: `Found ${vulnerability.type} vulnerability in tab. Click to view details.`
-        });
-        
-        // Store tab reference for click handler
-        this.notificationTabs = this.notificationTabs || new Map();
-        this.notificationTabs.set(notificationId, tabId);
-    }
-
-    handleNotificationClick(notificationId) {
-        const tabId = this.notificationTabs?.get(notificationId);
-        if (tabId) {
-            // Porta il tab in primo piano
-            chrome.tabs.update(tabId, { active: true });
-            
-            // Apri DevTools se possibile
-            chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-                if (tabs[0] && tabs[0].id === tabId) {
-                    // Trigger DevTools opening (se extension ha permissions)
-                    this.sendToContentScript(tabId, {
-                        type: 'show-devtools-notification'
-                    });
-                }
-            });
-        }
-        
-        if (chrome.notifications) {
-            chrome.notifications.clear(notificationId);
-        }
-    }
-
-    // ===============================
-    // DATA EXPORT
-    // ===============================
-    getTabData(tabId, sendResponse) {
-        const tabData = this.tabData.get(tabId);
-        
-        chrome.tabs.get(tabId, (tab) => {
-            if (chrome.runtime.lastError) {
-                sendResponse({ error: chrome.runtime.lastError.message });
-                return;
-            }
-            
-            sendResponse({
-                success: true,
-                data: {
-                    tab: {
-                        id: tab.id,
-                        url: tab.url,
-                        title: tab.title
-                    },
-                    scanData: tabData,
-                    isActive: this.activeScans.has(tabId)
-                }
-            });
-        });
-    }
-
-    exportScanData(tabId, sendResponse) {
-        const tabData = this.tabData.get(tabId);
-        
-        if (!tabData) {
-            sendResponse({ error: 'No scan data available' });
-            return;
-        }
-        
-        chrome.tabs.get(tabId, (tab) => {
-            if (chrome.runtime.lastError) {
-                sendResponse({ error: chrome.runtime.lastError.message });
-                return;
-            }
-            
-            const exportData = {
-                meta: {
-                    url: tab.url,
-                    title: tab.title,
-                    exportTime: new Date().toISOString(),
-                    scannerVersion: chrome.runtime.getManifest().version
-                },
-                scanData: tabData,
-                summary: {
-                    totalParameters: tabData.parameters?.length || 0,
-                    totalSinks: tabData.sinks?.length || 0,
-                    totalConnections: tabData.connections?.length || 0,
-                    vulnerabilityCount: tabData.vulnerabilityCount || 0,
-                    hasVulnerabilities: tabData.hasVulnerabilities || false
-                }
-            };
-            
-            sendResponse({
-                success: true,
-                data: exportData
-            });
-        });
-    }
-
-    // ===============================
-    // UTILITY METHODS
-    // ===============================
-    getAllTabsData() {
-        return Array.from(this.tabData.entries()).map(([tabId, data]) => ({
-            tabId,
-            ...data
-        }));
-    }
-
-    getActiveScansCount() {
-        return this.activeScans.size;
-    }
-
-    getTotalVulnerabilities() {
-        let total = 0;
-        this.tabData.forEach((data) => {
-            total += data.vulnerabilityCount || 0;
-        });
-        return total;
-    }
-
-    // Debug method
-    getDebugInfo() {
-        return {
-            connections: this.connections.size,
-            tabData: this.tabData.size,
-            activeScans: this.activeScans.size,
-            totalVulnerabilities: this.getTotalVulnerabilities()
-        };
-    }
+function newState(url) {
+  return { url: url || '', findings: new Map(), frames: new Map(), hookFailed: false };
 }
 
-// ===============================
-// INIZIALIZZAZIONE
-// ===============================
-const domXSSBackground = new DOMXSSBackground();
-
-// Esporta per debugging
-if (typeof window !== 'undefined') {
-    window.domXSSBackground = domXSSBackground;
+function stateOf(tabId) {
+  let s = tabs.get(tabId);
+  if (!s) { s = newState(); tabs.set(tabId, s); }
+  return s;
 }
+
+function frameOf(s, frameId) {
+  let f = s.frames.get(frameId);
+  if (!f) { f = { url: '', top: false, hooks: { active: [], failed: [] }, sources: [] }; s.frames.set(frameId, f); }
+  return f;
+}
+
+// ---------- snapshot e broadcast ----------
+function snapshot(tabId) {
+  const s = tabs.get(tabId) || newState();
+  const findings = Array.from(s.findings.values()).sort((a, b) =>
+    (SEV[b.sink.severity] - SEV[a.sink.severity]) || (b.lastTs - a.lastTs));
+  const sources = [];
+  s.frames.forEach((f, frameId) => f.sources.forEach((x) => sources.push({ ...x, frameId: frameId, top: f.top, frameUrl: f.url })));
+  return {
+    tabId: tabId,
+    url: s.url,
+    hookFailed: s.hookFailed,
+    frames: Array.from(s.frames.entries()).map(([frameId, f]) => ({ frameId: frameId, url: f.url, top: f.top, hooks: f.hooks })),
+    findings: findings,
+    sources: sources
+  };
+}
+
+function schedule(tabId) {
+  if (pending.has(tabId)) return;
+  pending.add(tabId);
+  setTimeout(() => {
+    pending.delete(tabId);
+    setBadge(tabId);
+    const set = ports.get(tabId);
+    if (!set || !set.size) return;
+    const state = snapshot(tabId);
+    set.forEach((p) => { try { p.postMessage({ type: 'state', state: state }); } catch (e) { /* porta chiusa */ } });
+  }, 150);
+}
+
+function setBadge(tabId) {
+  const s = tabs.get(tabId);
+  let n = 0;
+  let max = -1;
+  if (s) s.findings.forEach((f) => { if (f.confidence === 'high') { n++; max = Math.max(max, SEV[f.sink.severity]); } });
+  const act = api.browserAction;
+  if (!act) return;
+  const ig = () => {};
+  try {
+    act.setBadgeText({ tabId: tabId, text: n ? String(n) : '' }).catch(ig);
+    act.setBadgeBackgroundColor({ tabId: tabId, color: COLORS[max] || '#888888' }).catch(ig);
+  } catch (e) { /* tab chiuso */ }
+}
+
+// ---------- messaggi dai relay ----------
+api.runtime.onMessage.addListener((msg, sender) => {
+  if (!msg) return undefined;
+
+  if (msg.kind === 'get-config') {
+    return api.storage.local.get({ pauseOnTaint: false }).then((c) => ({ pause: c.pauseOnTaint }));
+  }
+
+  const tabId = sender.tab && sender.tab.id;
+  if (tabId == null || tabId < 0) return undefined;
+  const frameId = sender.frameId || 0;
+
+  switch (msg.kind) {
+    case 'frame-start': {
+      if (msg.top) {
+        tabs.set(tabId, newState(msg.url));
+        frameOf(tabs.get(tabId), 0).top = true;
+        frameOf(tabs.get(tabId), 0).url = msg.url;
+      } else {
+        const f = frameOf(stateOf(tabId), frameId);
+        f.url = msg.url;
+      }
+      schedule(tabId);
+      break;
+    }
+    case 'hook-failed': {
+      const s = stateOf(tabId);
+      const f = frameOf(s, frameId);
+      if (!f.hooks.active.length && msg.top) s.hookFailed = true;
+      schedule(tabId);
+      break;
+    }
+    case 'page-batch': {
+      const s = stateOf(tabId);
+      const f = frameOf(s, frameId);
+      for (const ev of msg.events || []) {
+        if (!ev) continue;
+        if (ev.type === 'ready') {
+          f.url = ev.url || f.url;
+          f.top = !!ev.top;
+          f.hooks = ev.hooks || f.hooks;
+          if (f.top) s.hookFailed = false;
+        } else if (ev.type === 'hooks') {
+          (ev.add || []).forEach((h) => f.hooks.active.push(h));
+        } else if (ev.type === 'sources') {
+          f.sources = ev.list || [];
+        } else if (ev.type === 'finding' && ev.finding) {
+          const fi = ev.finding;
+          const k = frameId + '|' + fi.key;
+          if (!s.findings.has(k) && s.findings.size >= MAX_FINDINGS) continue;
+          s.findings.set(k, { ...fi, gid: frameId + ':' + fi.id, frameId: frameId, frameUrl: sender.url || f.url });
+        }
+      }
+      schedule(tabId);
+      break;
+    }
+    default:
+  }
+  return undefined;
+});
+
+// ---------- pannello DevTools ----------
+api.runtime.onConnect.addListener((port) => {
+  if (port.name !== 'panel') return;
+  let tabId = null;
+
+  port.onMessage.addListener((m) => {
+    if (!m) return;
+    if (m.cmd === 'init') {
+      tabId = m.tabId;
+      if (!ports.has(tabId)) ports.set(tabId, new Set());
+      ports.get(tabId).add(port);
+      port.postMessage({ type: 'state', state: snapshot(tabId) });
+      api.storage.local.get({ pauseOnTaint: false }).then((c) => port.postMessage({ type: 'config', pause: c.pauseOnTaint }));
+      return;
+    }
+    if (tabId != null) command(tabId, m);
+  });
+
+  port.onDisconnect.addListener(() => {
+    if (tabId != null && ports.has(tabId)) ports.get(tabId).delete(port);
+  });
+});
+
+function toTab(tabId, cmd, options) {
+  api.tabs.sendMessage(tabId, { kind: 'cmd', cmd: cmd }, options || {}).catch(() => {});
+}
+
+function command(tabId, m) {
+  switch (m.cmd) {
+    case 'clear': {
+      const old = tabs.get(tabId);
+      const s = newState(old && old.url);
+      if (old) old.frames.forEach((f, id) => s.frames.set(id, { ...f, sources: f.sources }));
+      tabs.set(tabId, s);
+      toTab(tabId, { cmd: 'reset' });
+      schedule(tabId);
+      break;
+    }
+    case 'config':
+      api.storage.local.set({ pauseOnTaint: !!m.pause });
+      toTab(tabId, { cmd: 'config', pause: !!m.pause });
+      break;
+    case 'highlight':
+      toTab(tabId, { cmd: 'highlight', id: m.id }, { frameId: m.frameId });
+      break;
+    case 'reload':
+      api.tabs.reload(tabId, { bypassCache: true }).catch(() => {});
+      break;
+    case 'probe':
+      api.tabs.get(tabId).then((tab) => {
+        const u = new URL(tab.url);
+        if (u.protocol !== 'http:' && u.protocol !== 'https:') return;
+        u.searchParams.set('dxsprobe', MARKER);
+        if (!u.hash) u.hash = '#' + MARKER;
+        return api.tabs.update(tabId, { url: u.toString() });
+      }).catch(() => {});
+      break;
+    default:
+  }
+}
+
+api.tabs.onRemoved.addListener((tabId) => {
+  tabs.delete(tabId);
+  ports.delete(tabId);
+  pending.delete(tabId);
+});

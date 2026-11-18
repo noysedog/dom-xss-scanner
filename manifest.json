@@ -1,41 +1,41 @@
 {
   "manifest_version": 2,
   "name": "DOM XSS Scanner",
-  "version": "1.0",
-  "description": "Analizza parametri URL e traccia collegamenti con sink DOM vulnerabili",
+  "version": "2.0.1",
+  "description": "Taint tracking passivo: segue i valori da URL/DOM verso i sink pericolosi e li mostra in un pannello DevTools.",
 
-  "permissions": [
-    "activeTab",
-    "tabs",
-    "storage",
-    "devtools",
-    "<all_urls>",
-    "contextMenus",
-    "notifications"
-  ],
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "dom-xss-scanner@local",
+      "strict_min_version": "109.0"
+    }
+  },
+
+  "icons": { "48": "icons/icon.svg", "96": "icons/icon.svg" },
+
+  "permissions": ["tabs", "storage", "<all_urls>"],
 
   "devtools_page": "devtools/devtools.html",
+
+  "browser_action": {
+    "default_title": "DOM XSS Scanner",
+    "default_icon": "icons/icon.svg"
+  },
+
+  "background": {
+    "scripts": ["background/background.js"],
+    "persistent": true
+  },
 
   "content_scripts": [
     {
       "matches": ["<all_urls>"],
-      "js": [
-        "content/url-analyzer.js",
-        "content/sink-detector.js", 
-        "content/dom-tracker.js",
-        "content/content-script.js"
-      ],
+      "js": ["page/page-script.js", "content/relay.js"],
       "run_at": "document_start",
-      "all_frames": true
+      "all_frames": true,
+      "match_about_blank": true
     }
   ],
 
-  "background": {
-    "scripts": ["background/background.js"],
-    "persistent": false
-  },
-
-  "web_accessible_resources": [
-    "injected/page-script.js"
-  ]
+  "web_accessible_resources": ["page/page-script.js"]
 }

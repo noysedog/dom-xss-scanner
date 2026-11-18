@@ -1,9 +1,2 @@
-// ===============================
-// DEVTOOLS/DEVTOOLS.JS
-// ===============================
-// Crea il panel nelle DevTools
-chrome.devtools.panels.create(
-    "DOM XSS Scanner",
-    "icon.png",
-    "devtools/panel.html"
-);
+// Registra il pannello nelle DevTools
+browser.devtools.panels.create('DOM XSS', '/icons/icon.svg', '/devtools/panel.html');
