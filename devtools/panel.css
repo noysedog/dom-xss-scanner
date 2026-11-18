@@ -48,7 +48,11 @@ main { padding: 6px 12px 24px; }
 .tag { font-size: 11px; padding: 0 6px; border-radius: 3px; border: 1px solid currentColor; }
 .tag.critical { color: var(--critical); } .tag.high { color: var(--high); }
 .tag.medium { color: var(--medium); } .tag.low { color: var(--low); }
-.tag.conf-high { color: var(--accent); } .tag.conf-medium { color: var(--muted); }
+.tag.confirmed { color: var(--critical); font-weight: 600; }
+.tag.flowtag { color: var(--muted); }
+.tag.risk-critical, .tag.risk-high, .tag.risk-medium, .tag.risk-low { color: var(--muted); border-style: dashed; }
+.row.flowonly { border-left-color: var(--line); }
+.note { margin: 4px 0 0; color: var(--muted); max-width: 90ch; }
 .count { color: var(--muted); }
 
 /* il percorso source -> sink -> DOM è l'elemento centrale */
@@ -61,6 +65,10 @@ main { padding: 6px 12px 24px; }
 .seg.src, .seg.snk { clip-path: polygon(0 0, calc(100% - 9px) 0, 100% 50%, calc(100% - 9px) 100%, 0 100%); padding-right: 16px; }
 
 pre.excerpt { margin: 4px 0; padding: 6px 8px; background: var(--bg2); border-radius: 3px; font: 12px/1.4 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+.probe { margin-top: 8px; }
+.probe label { display: block; color: var(--muted); font-size: 11px; margin-bottom: 2px; }
+.probe-row { display: flex; gap: 6px; }
+.probe-in { flex: 1; min-width: 0; font: 12px var(--mono); background: var(--bg2); border: 1px solid var(--line); border-radius: 4px; padding: 3px 6px; }
 .btns { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-top: 6px; }
 details summary { cursor: pointer; color: var(--muted); }
 ol.stack { margin: 4px 0 0; padding-left: 22px; font: 12px/1.5 var(--mono); }

@@ -38,7 +38,7 @@ function frameOf(s, frameId) {
 function snapshot(tabId) {
   const s = tabs.get(tabId) || newState();
   const findings = Array.from(s.findings.values()).sort((a, b) =>
-    (SEV[b.sink.severity] - SEV[a.sink.severity]) || (b.lastTs - a.lastTs));
+    ((b.confidence === 'high') - (a.confidence === 'high')) || (SEV[b.sink.severity] - SEV[a.sink.severity]) || (b.lastTs - a.lastTs));
   const sources = [];
   s.frames.forEach((f, frameId) => f.sources.forEach((x) => sources.push({ ...x, frameId: frameId, top: f.top, frameUrl: f.url })));
   return {
@@ -186,6 +186,21 @@ function command(tabId, m) {
       break;
     case 'reload':
       api.tabs.reload(tabId, { bypassCache: true }).catch(() => {});
+      break;
+    case 'probe-source':
+      api.tabs.get(tabId).then((tab) => {
+        const val = typeof m.value === 'string' && m.value ? m.value.slice(0, 2000) : MARKER;
+        const u = new URL(tab.url);
+        if (u.protocol !== 'http:' && u.protocol !== 'https:') return;
+        if (m.kind === 'location.search') {
+          if (m.name === '(query)') u.search = '?' + val; else u.searchParams.set(m.name, val);
+        } else if (m.kind === 'location.hash') {
+          const hp = new URLSearchParams(u.hash.slice(1));
+          if (m.name !== '(hash)' && !/^segmento /.test(m.name) && hp.has(m.name)) { hp.set(m.name, val); u.hash = hp.toString(); }
+          else u.hash = '#' + val;
+        } else return;
+        return api.tabs.update(tabId, { url: u.toString() });
+      }).catch(() => {});
       break;
     case 'probe':
       api.tabs.get(tabId).then((tab) => {

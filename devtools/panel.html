@@ -9,7 +9,7 @@
   <header class="bar">
     <div class="stats">
       <span><b id="c-find">0</b> finding</span>
-      <span><b id="c-high">0</b> ad alta confidenza</span>
+      <span><b id="c-high">0</b> con sintassi non neutralizzata</span>
       <span><b id="c-src">0</b> sorgenti</span>
       <span id="hooks" class="muted">Hook: in attesa</span>
     </div>
@@ -26,15 +26,15 @@
       <button role="tab" id="tab-findings" aria-selected="true">Finding</button>
       <button role="tab" id="tab-sources" aria-selected="false">Sorgenti</button>
     </nav>
-    <label>Gravità minima
+    <label>Rischio minimo del sink
       <select id="sev">
         <option value="all">tutte</option>
-        <option value="medium">media</option>
-        <option value="high">alta</option>
-        <option value="critical">critica</option>
+        <option value="medium">medio</option>
+        <option value="high">alto</option>
+        <option value="critical">critico</option>
       </select>
     </label>
-    <label><input type="checkbox" id="chk-high"> solo alta confidenza</label>
+    <label><input type="checkbox" id="chk-high"> solo sintassi non neutralizzata</label>
     <label title="Esegue 'debugger;' quando un valore controllabile arriva a un sink critico o alto. Serve il debugger aperto.">
       <input type="checkbox" id="chk-pause"> ferma il debugger sul sink
     </label>

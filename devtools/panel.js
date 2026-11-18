@@ -10,9 +10,10 @@
   const api = browser;
   const $ = (s) => document.querySelector(s);
   const SEV_ORDER = { low: 0, medium: 1, high: 2, critical: 3 };
-  const SEV_LABEL = { critical: 'critica', high: 'alta', medium: 'media', low: 'bassa' };
+  const SEV_LABEL = { critical: 'critico', high: 'alto', medium: 'medio', low: 'basso' };
 
-  const state = { snap: null, view: 'findings', minSev: 'all', onlyHigh: false, open: new Set() };
+  const MARKER = 'dxs9q"\'<i>x</i>';
+  const state = { drafts: new Map(), pendingRender: false, snap: null, view: 'findings', minSev: 'all', onlyHigh: false, open: new Set() };
 
   // ---------- tema ----------
   const applyTheme = (t) => { document.documentElement.dataset.theme = t === 'dark' ? 'dark' : 'light'; };
@@ -23,7 +24,12 @@
   const port = api.runtime.connect({ name: 'panel' });
   port.postMessage({ cmd: 'init', tabId: api.devtools.inspectedWindow.tabId });
   port.onMessage.addListener((m) => {
-    if (m.type === 'state') { state.snap = m.state; render(); }
+    if (m.type === 'state') {
+      state.snap = m.state;
+      // non ridisegnare mentre l'utente sta scrivendo in un campo di prova
+      if (document.activeElement && document.activeElement.classList.contains('probe-in')) state.pendingRender = true;
+      else render();
+    }
     else if (m.type === 'config') { $('#chk-pause').checked = !!m.pause; }
   });
   port.onDisconnect.addListener(() => { $('#lost').hidden = false; });
@@ -103,7 +109,7 @@
       root.append(h('p', { class: 'empty' },
         state.snap.findings.length
           ? 'Nessun finding con questi filtri.'
-          : 'Nessun valore controllabile è arrivato a un sink. Naviga la pagina, usa i suoi controlli, oppure prova il marcatore per verificare la riflessione.'));
+          : 'Nessun valore controllabile è arrivato a un sink. Naviga la pagina, usa i suoi controlli, oppure prova il marcatore. Se il marcatore non compare qui, di solito la pagina lo codifica o non lo usa.'));
       return;
     }
     list.forEach((f) => root.append(row(f)));
@@ -111,19 +117,26 @@
 
   function row(f) {
     const sev = f.sink.severity;
+    const confirmed = f.confidence === 'high';
     const canHl = f.element && f.element !== 'document';
-    return h('article', { class: 'row sev-' + sev },
+    const probeable = f.source.kind === 'location.search' || f.source.kind === 'location.hash';
+    const note = confirmed
+      ? 'Il valore preso da ' + f.source.kind + ' arriva a ' + f.sink.name + ' con caratteri speciali intatti (< > " \' = ( ) ...): la pagina non li neutralizza. È il segnale più forte che questo strumento può dare; resta da verificare che il codice venga eseguito.'
+      : 'Il testo preso da ' + f.source.kind + ' finisce in ' + f.sink.name + ', ma contiene solo caratteri innocui. È un flusso, non ancora una vulnerabilità: non sappiamo se la pagina sanifica. "Verifica con marcatore" lo controlla.';
+    return h('article', { class: 'row ' + (confirmed ? 'sev-' + sev : 'flowonly') },
       h('div', { class: 'head' },
-        h('span', { class: 'tag ' + sev }, SEV_LABEL[sev]),
-        h('span', { class: 'tag conf-' + f.confidence }, f.confidence === 'high' ? 'alta confidenza' : 'solo riflesso'),
+        h('span', { class: 'tag ' + (confirmed ? 'confirmed' : 'flowtag') }, confirmed ? 'sintassi non neutralizzata' : 'solo flusso'),
         h('span', { class: 'title' }, f.source.kind + ' → ' + f.sink.name),
+        h('span', { class: 'tag risk-' + sev, title: 'Pericolosità del sink in sé, non della pagina' }, 'sink: ' + SEV_LABEL[sev]),
         f.count > 1 && h('span', { class: 'count' }, '×' + f.count),
         !f.frame.top && h('span', { class: 'count' }, 'iframe ' + where(f.frameUrl))),
+      h('p', { class: 'note' }, note),
       h('div', { class: 'flow' },
         h('div', { class: 'seg src' }, h('small', null, 'Sorgente'), f.source.name + ' = ' + short(f.source.value, 80)),
         h('div', { class: 'seg snk' }, h('small', null, 'Sink'), f.sink.name, h('small', null, where(f.where.replace(/:\d+:\d+$/, '')) + ':' + (f.where.match(/:(\d+):\d+$/) || [, '?'])[1])),
         h('div', { class: 'seg dom' }, h('small', null, 'Elemento'), f.element || '—')),
       h('pre', { class: 'excerpt' }, f.excerpt),
+      probeable && probeBox(f),
       h('div', { class: 'btns' },
         canHl && h('button', { onclick: () => cmd('highlight', { id: f.id, frameId: f.frameId }) }, 'Evidenzia nella pagina'),
         h('button', { onclick: () => copy(JSON.stringify(f, null, 2)) }, 'Copia JSON')),
@@ -132,7 +145,26 @@
         ontoggle: (e) => { if (e.target.open) state.open.add(f.gid); else state.open.delete(f.gid); }
       },
         h('summary', null, 'Stack (' + f.stack.length + ')'),
-        h('ol', { class: 'stack' }, f.stack.map((s) => h('li', null, s.fn + ' — ' + s.url + ':' + s.line + ':' + s.col)))));
+        h('ol', { class: 'stack' }, f.stack.map((st) => h('li', null, st.fn + ' — ' + st.url + ':' + st.line + ':' + st.col)))));
+  }
+
+  // Campo modificabile: imposta questa sorgente al valore scritto e ricarica la pagina.
+  function probeBox(f) {
+    const run = () => cmd('probe-source', { kind: f.source.kind, name: f.source.name, value: state.drafts.get(f.gid) || MARKER });
+    return h('div', { class: 'probe' },
+      h('label', null, 'Valore da provare su ' + f.source.kind + ' · ' + f.source.name),
+      h('div', { class: 'probe-row' },
+        h('input', {
+          type: 'text', class: 'probe-in', spellcheck: 'false', value: state.drafts.get(f.gid) || MARKER,
+          'aria-label': 'Valore da provare',
+          oninput: (e) => state.drafts.set(f.gid, e.target.value),
+          onkeydown: (e) => { if (e.key === 'Enter') run(); }
+        }),
+        h('button', { title: 'Imposta la sorgente a questo valore e ricarica la pagina', onclick: run }, 'Prova'),
+        h('button', {
+          title: 'Ripristina il marcatore innocuo',
+          onclick: (e) => { state.drafts.delete(f.gid); e.target.closest('.probe').querySelector('input').value = MARKER; }
+        }, 'Marcatore')));
   }
 
   function renderSources() {
@@ -164,13 +196,17 @@
   $('#btn-probe').addEventListener('click', () => cmd('probe'));
   $('#btn-export').addEventListener('click', () => {
     if (!state.snap) return;
-    const out = { exported: new Date().toISOString(), version: '2.0.1', url: state.snap.url, findings: state.snap.findings, sources: state.snap.sources };
+    const out = { exported: new Date().toISOString(), version: '2.0.3', url: state.snap.url, findings: state.snap.findings, sources: state.snap.sources };
     const url = URL.createObjectURL(new Blob([JSON.stringify(out, null, 2)], { type: 'application/json' }));
     const a = h('a', { href: url, download: 'dom-xss-' + new Date().toISOString().slice(0, 10) + '.json' });
     document.body.append(a);
     a.click();
     a.remove();
     URL.revokeObjectURL(url);
+  });
+
+  document.addEventListener('focusout', (e) => {
+    if (state.pendingRender && e.target.classList && e.target.classList.contains('probe-in')) { state.pendingRender = false; setTimeout(render, 0); }
   });
 
   setView('findings');

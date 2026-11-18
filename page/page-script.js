@@ -301,7 +301,7 @@
         }
         usedTok.push(t.token);
         found++;
-        conf = conf || (s === 'critical' || META.test(t.token) ? 'high' : 'medium');
+        conf = conf || (META.test(t.token) ? 'high' : 'medium');
         __dxs_record(sink, s, conf, t, value, el);
         if (CFG.pause && conf === 'high' && (s === 'critical' || s === 'high')) pause = true;
       }

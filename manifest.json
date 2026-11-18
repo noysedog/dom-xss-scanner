@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "name": "DOM XSS Scanner",
-  "version": "2.0.1",
+  "version": "2.0.3",
   "description": "Taint tracking passivo: segue i valori da URL/DOM verso i sink pericolosi e li mostra in un pannello DevTools.",
 
   "browser_specific_settings": {
